@@ -18,7 +18,10 @@ export const initializeDatabase = (): void => {
         name TEXT NOT NULL,
         arguments TEXT NOT NULL,
         status TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        pixelflut_host TEXT NOT NULL,
+        pixelflut_port INTEGER NOT NULL,
+        image_file_path TEXT NOT NULL
         )`,
         err => {
             if (err) {

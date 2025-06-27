@@ -1,16 +1,42 @@
 'use server';
 
 import { spawn } from 'child_process';
+import fs from 'fs';
 
 import db from './db';
 
 const sturmflutBinary = '/usr/bin/sturmflut';
 
-const createOrFailPid = async (pid: number, args: string[]): Promise<number> =>
+export interface DbProcess {
+    pid: number;
+    name: string;
+    arguments: string;
+    status: string;
+    created_at: string;
+    pixelflut_host: string;
+    pixelflut_port: number;
+    image_file_path: string;
+}
+
+const createOrFailPid = async (
+    pid: number,
+    host: string,
+    port: number,
+    image_file_path: string,
+    args: string[],
+): Promise<number> =>
     new Promise((resolve, reject) => {
         db.run(
-            'INSERT INTO processes (pid, name, arguments, status) VALUES (?, ?, ?, ?)',
-            [pid, 'sturmflut', args.join(' '), 'running'],
+            'INSERT INTO processes (pid, name, arguments, status, pixelflut_host, pixelflut_port, image_file_path) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [
+                pid,
+                'sturmflut',
+                args.join(' '),
+                'running',
+                host,
+                port,
+                image_file_path,
+            ],
             err => {
                 if (err) {
                     console.error('Error creating PID entry:', err.message);
@@ -32,7 +58,12 @@ const deletePidFile = (pid: number): void => {
     });
 };
 
-export const startSturmflut = async (args: string[]): Promise<void> => {
+export const startSturmflut = async (
+    host: string,
+    port: number,
+    fileUrlEncoded: string,
+    args: string[],
+): Promise<void> => {
     const childProcess = spawn(sturmflutBinary, args, {
         stdio: 'inherit',
         shell: true,
@@ -45,7 +76,17 @@ export const startSturmflut = async (args: string[]): Promise<void> => {
 
     const { pid } = childProcess;
 
-    await createOrFailPid(childProcess.pid, args);
+    // write file to temp directory
+    const filePath = `/tmp/sturmflut-${pid}.png`;
+    try {
+        const fileData = await fs.promises.readFile(fileUrlEncoded);
+        await fs.promises.writeFile(filePath, fileData);
+    } catch (error) {
+        console.error('Error writing image file:', error);
+        return;
+    }
+
+    await createOrFailPid(childProcess.pid, host, port, filePath, args);
 
     childProcess.on('exit', async code => {
         console.log(`Sturmflut process exited with code ${code}`);
@@ -137,34 +178,14 @@ export const stopAnyIfRunning = async (): Promise<void> => {
     });
 };
 
-export const getRunningProcesses = async (): Promise<
-    {
-        pid: number;
-        name: string;
-        status: string;
-        arguments: string;
-    }[]
-> =>
+export const getRunningProcesses = async (): Promise<DbProcess[]> =>
     new Promise((resolve, reject) => {
-        db.all(
-            'SELECT pid, name, status, arguments FROM processes',
-            (err, rows) => {
-                if (err) {
-                    console.error(
-                        'Error fetching running processes:',
-                        err.message,
-                    );
-                    reject(err);
-                } else {
-                    resolve(
-                        rows as {
-                            pid: number;
-                            name: string;
-                            status: string;
-                            arguments: string;
-                        }[],
-                    );
-                }
-            },
-        );
+        db.all('SELECT * FROM processes', (err, rows) => {
+            if (err) {
+                console.error('Error fetching running processes:', err.message);
+                reject(err);
+            } else {
+                resolve(rows as DbProcess[]);
+            }
+        });
     });
